@@ -581,68 +581,85 @@ Returns:
 On success, the function returns the number of variables filled. This count
 can match the expected number of readings or fewer, even zero, if a
 matching failure happens.
+
+Deprecated:
+
+The deprecation targets parameters of the form `&param` which take the address of
+a local and make most usages of this function non-@safe. Replace these parameters
+simply by `param`.
+Paramters of the form `paramFunc()` are false positives; replace them by
+`*paramFunc()` to surpass the deprecation warning correctly.
  */
-uint formattedRead(R, Char, S...)(ref R r, const(Char)[] fmt, S args)
+uint formattedRead(R, Char)(ref R r, const(Char)[] fmt)
+{
+    auto spec = FormatSpec!Char(fmt);
+    spec.readUpToNextSpec(r);
+    enforce(spec.trailing.empty, "Trailing characters in formattedRead format string");
+    return 0;
+}
+
+/// ditto
+deprecated("do not use '&' before parameters and let them bind by ref insted")
+uint formattedRead(R, Char, T, S...)(ref R r, const(Char)[] fmt, auto ref T arg, auto ref S args)
+    if (is(typeof(*arg)) && !__traits(isRef, arg))
+{
+    import std.functional : forward;
+    return formattedRead(r, fmt, *arg, forward!args);
+}
+
+/// ditto
+uint formattedRead(R, Char, T, S...)(ref R r, const(Char)[] fmt, ref T arg, auto ref S args)
 {
     import std.typecons : isTuple;
 
     auto spec = FormatSpec!Char(fmt);
-    static if (!S.length)
+
+    // The function below accounts for '*' == fields meant to be
+    // read and skipped
+    void skipUnstoredFields()
     {
-        spec.readUpToNextSpec(r);
-        enforce(spec.trailing.empty, "Trailing characters in formattedRead format string");
-        return 0;
+        for (;;)
+        {
+            spec.readUpToNextSpec(r);
+            if (spec.width != spec.DYNAMIC) break;
+            // must skip this field
+            skipData(r, spec);
+        }
+    }
+
+    skipUnstoredFields();
+    if (r.empty) return 0; // Input is empty, nothing to read
+
+    alias A = typeof(arg);
+    static if (isTuple!A)
+    {
+        foreach (i, T; A.Types)
+        {
+            arg[i] = unformatValue!(T)(r, spec);
+            skipUnstoredFields();
+        }
     }
     else
     {
-        // The function below accounts for '*' == fields meant to be
-        // read and skipped
-        void skipUnstoredFields()
-        {
-            for (;;)
-            {
-                spec.readUpToNextSpec(r);
-                if (spec.width != spec.DYNAMIC) break;
-                // must skip this field
-                skipData(r, spec);
-            }
-        }
-
-        skipUnstoredFields();
-        if (r.empty)
-        {
-            // Input is empty, nothing to read
-            return 0;
-        }
-        alias A = typeof(*args[0]);
-        static if (isTuple!A)
-        {
-            foreach (i, T; A.Types)
-            {
-                (*args[0])[i] = unformatValue!(T)(r, spec);
-                skipUnstoredFields();
-            }
-        }
-        else
-        {
-            *args[0] = unformatValue!(A)(r, spec);
-        }
-        return 1 + formattedRead(r, spec.trailing, args[1 .. $]);
+        arg = unformatValue!(A)(r, spec);
     }
+    import std.functional : forward;
+    return 1 + formattedRead(r, spec.trailing, forward!args);
 }
 
 ///
-@system unittest
+pure @system unittest
 {
     string s = "hello!124:34.5";
     string a;
     int b;
     double c;
+    // taking address of a local makes it @system, cf. Deprecated section
     formattedRead(s, "%s!%s:%s", &a, &b, &c);
     assert(a == "hello" && b == 124 && c == 34.5);
 }
 
-@system unittest
+pure @system unittest
 {
     import std.math;
     string s = " 1.2 3.4 ";
@@ -652,6 +669,18 @@ uint formattedRead(R, Char, S...)(ref R r, const(Char)[] fmt, S args)
     assert(approxEqual(x, 1.2));
     assert(approxEqual(y, 3.4));
     assert(isNaN(z));
+}
+
+///
+pure @safe unittest
+{
+    string s = "hello!124:34.5";
+    string a;
+    int b;
+    double c;
+    // taking parameter by ref makes it @safe, cf. Deprecated section
+    formattedRead(s, "%s!%s:%s", a, b, c);
+    assert(a == "hello" && b == 124 && c == 34.5);
 }
 
 template FormatSpec(Char)
