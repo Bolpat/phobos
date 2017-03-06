@@ -1768,13 +1768,14 @@ is recommended if you want to process a complete file.
      * $(LINK2 std_format.html#_format-string, _format specifier) using
      * $(REF formattedRead, std,_format).
      */
-    uint readf(Data...)(in char[] format, Data data)
+    uint readf(Data...)(in char[] format, auto ref Data data)
     {
+        import std.functional : forward;
         import std.format : formattedRead;
 
         assert(isOpen);
         auto input = LockingTextReader(this);
-        return formattedRead(input, format, data);
+        return formattedRead(input, format, forward!data);
     }
 
     ///
@@ -3645,9 +3646,10 @@ void writefln(T...)(T args)
  * $(LINK2 std_format.html#_format-string, _format specifier) using
  * $(REF formattedRead, std,_format).
  */
-uint readf(A...)(in char[] format, A args)
+uint readf(A...)(in char[] format, auto ref A args)
 {
-    return stdin.readf(format, args);
+    import std.functional : forward;
+    return stdin.readf(format, forward!args);
 }
 
 @system unittest
